@@ -1,15 +1,15 @@
 <?php
 /**
  * Plugin Name: Spot Price Ticker
- * Description: Precious-metal spot price bar fed by the Dillon Gage FizTrade API. Place it with the [spot_ticker] shortcode. Settings → Spot Price Ticker.
- * Version:     1.0.0
+ * Description: Precious-metal spot price bar fed by the Dillon Gage FizTrade API ([spot_ticker] shortcode, Settings → Spot Price Ticker), plus optional spot-based WooCommerce pricing (WooCommerce → Metal Pricing).
+ * Version:     1.1.0
  * Requires PHP: 7.4
  * License:     GPL-2.0-or-later
  */
 
 defined( 'ABSPATH' ) || exit;
 
-const SPT_VERSION   = '1.0.0';
+const SPT_VERSION   = '1.1.0';
 const SPT_OPTION    = 'spt_settings';
 const SPT_CACHE     = 'spt_prices';
 const SPT_LAST_GOOD = 'spt_last_good';
@@ -127,10 +127,10 @@ function spt_pick( array $flat, $metal, array $names, array $exclude = array() )
 	return null;
 }
 
-function spt_normalize( array $data, array $s ) {
+function spt_normalize( array $data, array $metals ) {
 	$flat  = spt_flatten( $data );
 	$items = array();
-	foreach ( $s['metals'] as $m ) {
+	foreach ( $metals as $m ) {
 		if ( ! array_key_exists( $m, SPT_METALS ) ) {
 			continue;
 		}
@@ -160,7 +160,8 @@ function spt_get_prices() {
 	}
 	$s     = spt_settings();
 	$data  = spt_fetch_remote( $s );
-	$items = is_wp_error( $data ) ? array() : spt_normalize( $data, $s );
+	// Always parse every metal: store pricing relies on this too, whatever the ticker shows.
+	$items = is_wp_error( $data ) ? array() : spt_normalize( $data, array_keys( SPT_METALS ) );
 
 	if ( $items ) {
 		$payload = array( 'items' => $items, 'updated' => time(), 'stale' => false );
@@ -188,7 +189,12 @@ add_action( 'rest_api_init', function () {
 		'methods'             => 'GET',
 		'permission_callback' => '__return_true',
 		'callback'            => function () {
-			$res = new WP_REST_Response( spt_get_prices() );
+			$payload          = spt_get_prices();
+			$shown            = spt_settings()['metals'];
+			$payload['items'] = array_values( array_filter( $payload['items'], function ( $it ) use ( $shown ) {
+				return in_array( $it['metal'], $shown, true );
+			} ) );
+			$res = new WP_REST_Response( $payload );
 			// Page caches must not hold on to live prices.
 			$res->header( 'Cache-Control', 'no-store, no-cache, max-age=0' );
 			return $res;
@@ -384,7 +390,7 @@ function spt_render_test( array $s ) {
 		}
 		return;
 	}
-	$items = spt_normalize( $data, $s );
+	$items = spt_normalize( $data, array_keys( SPT_METALS ) );
 	if ( $items ) {
 		echo '<div class="notice notice-success inline"><p>Connected. These are the prices the bar will show:</p></div>';
 		echo '<table class="widefat striped" style="max-width:720px"><thead><tr><th>Metal</th><th>Bid</th><th>Ask</th><th>Change</th><th>Change %</th></tr></thead><tbody>';
@@ -410,5 +416,26 @@ register_uninstall_hook( __FILE__, 'spt_uninstall' );
 function spt_uninstall() {
 	delete_option( SPT_OPTION );
 	delete_option( SPT_LAST_GOOD );
+	delete_option( 'spt_wc_settings' );
+	delete_option( 'spt_wc_state' );
+	delete_option( 'spt_wc_log' );
 	delete_transient( SPT_CACHE );
 }
+
+add_action( 'plugins_loaded', function () {
+	if ( class_exists( 'WooCommerce' ) ) {
+		require_once __DIR__ . '/includes/woocommerce-pricing.php';
+	}
+} );
+
+register_deactivation_hook( __FILE__, function () {
+	wp_clear_scheduled_hook( 'spt_wc_reprice' );
+} );
+
+add_action( 'before_woocommerce_init', function () {
+	if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__, true );
+		// Wire/card repricing needs the classic checkout (Elementor's Checkout widget or [woocommerce_checkout]).
+		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__, false );
+	}
+} );
