@@ -1,0 +1,127 @@
+.spt-bar {
+	--spt-bg: var(--e-global-color-primary, #0b1f3a);
+	--spt-text: #ffffff;
+	--spt-accent: var(--e-global-color-accent, #c9a646);
+	--spt-up: #4ade80;
+	--spt-down: #f87171;
+
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	box-sizing: border-box;
+	width: 100%;
+	min-height: 36px;
+	padding: 0 16px;
+	overflow: hidden;
+	background: var(--spt-bg);
+	color: var(--spt-text);
+	font-family: var(--e-global-typography-text-font-family, inherit);
+	font-size: 14px;
+	line-height: 1.3;
+	font-variant-numeric: tabular-nums;
+}
+
+.spt-bar[hidden] {
+	display: none;
+}
+
+.spt-time {
+	flex: none;
+	color: var(--spt-accent);
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	white-space: nowrap;
+}
+
+.spt-viewport {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.spt-track {
+	display: flex;
+	width: max-content;
+	margin: 0 auto;
+	padding: 0;
+	list-style: none;
+}
+
+/* Right padding (not gap) keeps the duplicated half exactly half for seamless scrolling. */
+.spt-item {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	margin: 0;
+	padding: 8px 28px 8px 0;
+	white-space: nowrap;
+}
+
+.spt-label {
+	color: var(--spt-accent);
+	font-weight: 600;
+}
+
+.spt-price {
+	font-weight: 600;
+}
+
+.spt-change {
+	font-size: 12px;
+}
+
+.spt-up .spt-change {
+	color: var(--spt-up);
+}
+
+.spt-down .spt-change {
+	color: var(--spt-down);
+}
+
+.spt-loading {
+	opacity: 0.7;
+}
+
+.spt-credit {
+	flex: none;
+	color: inherit;
+	font-size: 11px;
+	opacity: 0.75;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+a.spt-credit:hover,
+a.spt-credit:focus {
+	opacity: 1;
+	text-decoration: underline;
+}
+
+.spt-scrolling .spt-track {
+	margin: 0;
+	animation: spt-scroll var(--spt-duration, 30s) linear infinite;
+}
+
+.spt-bar:hover .spt-track,
+.spt-bar:focus-within .spt-track {
+	animation-play-state: paused;
+}
+
+@keyframes spt-scroll {
+	from { transform: translateX(0); }
+	to { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.spt-viewport {
+		overflow-x: auto;
+	}
+}
+
+@media (max-width: 600px) {
+	.spt-time {
+		display: none;
+	}
+}
