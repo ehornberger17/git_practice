@@ -17,6 +17,7 @@ class DGBP_Admin {
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'assets' ) );
 		add_action( 'wp_ajax_dgbp_test', array( __CLASS__, 'ajax_test' ) );
 		add_action( 'admin_notices', array( __CLASS__, 'notices' ) );
+		add_action( 'admin_post_dgbp_accept', array( __CLASS__, 'accept' ) );
 		add_filter( 'plugin_action_links_' . plugin_basename( DGBP_FILE ), array( __CLASS__, 'action_links' ) );
 	}
 
@@ -53,10 +54,39 @@ class DGBP_Admin {
 		);
 	}
 
+	public static function accept() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Not allowed' );
+		}
+		check_admin_referer( 'dgbp_accept' );
+		DGBP_API::accept_current();
+		wp_safe_redirect( add_query_arg( 'dgbp_accepted', 1, wp_get_referer() ? wp_get_referer() : admin_url( 'options-general.php?page=dgbp' ) ) );
+		exit;
+	}
+
 	public static function notices() {
 		$screen = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
 		if ( ! $screen || ! current_user_can( 'manage_options' ) ) {
 			return;
+		}
+		if ( ! empty( $_GET['dgbp_accepted'] ) ) { // phpcs:ignore
+			echo '<div class="notice notice-success is-dismissible"><p><strong>DG Bullion:</strong> current prices accepted and the store has been repriced.</p></div>';
+		}
+		$holds = DGBP_API::holds();
+		if ( $holds ) {
+			$rows = '';
+			foreach ( $holds as $h ) {
+				$change = $h['old'] > 0 ? ( $h['new'] - $h['old'] ) / $h['old'] * 100 : 0;
+				$rows  .= '<li>' . esc_html( sprintf( '%s: $%s → $%s (%+.2f%%) at %s', $h['label'], number_format( $h['old'], 2 ), number_format( $h['new'], 2 ), $change, wp_date( 'g:i A', $h['time'] ) ) ) . '</li>';
+			}
+			$url = wp_nonce_url( admin_url( 'admin-post.php?action=dgbp_accept' ), 'dgbp_accept' );
+			printf(
+				'<div class="notice notice-error"><p><strong>DG Bullion: prices are on hold.</strong> Dillon Gage reported a move larger than %s%% in one update, so the store is still using the previous prices. If that price isn\'t accepted, bullion sales stop after %d minutes.</p><ul style="list-style:disc;margin-left:2em">%s</ul><p><a class="button button-primary" href="%s">Accept current prices</a> &nbsp;If this was a glitch, the hold clears by itself once Dillon Gage sends a normal price again.</p></div>',
+				esc_html( DGBP_Settings::get( 'max_jump_pct' ) ),
+				(int) DGBP_Settings::get( 'stale_minutes' ),
+				$rows, // phpcs:ignore -- escaped above.
+				esc_url( $url )
+			);
 		}
 		if ( '' === (string) DGBP_Settings::get( 'token' ) && in_array( $screen->id, array( 'settings_page_dgbp', 'plugins' ), true ) ) {
 			echo '<div class="notice notice-warning"><p><strong>DG Bullion:</strong> add your FizTrade API token under <a href="' . esc_url( admin_url( 'options-general.php?page=dgbp' ) ) . '">Settings &rarr; DG Bullion</a>.</p></div>';
@@ -117,6 +147,7 @@ class DGBP_Admin {
 		$ints = array(
 			'cache_seconds'    => array( 5, 3600 ),
 			'stale_minutes'    => array( 1, 1440 ),
+			'lock_minutes'     => array( 0, 120 ),
 			'ticker_refresh'   => array( 10, 3600 ),
 			'ticker_height'    => array( 20, 80 ),
 			'ticker_font_size' => array( 10, 24 ),
@@ -127,7 +158,7 @@ class DGBP_Admin {
 			}
 		}
 
-		foreach ( array( 'debit_pct', 'credit_pct' ) as $k ) {
+		foreach ( array( 'debit_pct', 'credit_pct', 'max_jump_pct' ) as $k ) {
 			if ( isset( $in[ $k ] ) ) {
 				$out[ $k ] = min( 50, max( 0, (float) $in[ $k ] ) );
 			}
@@ -251,6 +282,9 @@ class DGBP_Admin {
 					self::row( 'Stop selling if prices older than (minutes)', function () use ( $s ) {
 						self::text( 'stale_minutes', $s, 'number', 'min="1" max="1440" style="width:90px"' );
 					}, 'If the API is down longer than this, bullion products become unpurchasable instead of selling at an old price.' );
+					self::row( 'Hold prices if one update moves more than (%)', function () use ( $s ) {
+						self::text( 'max_jump_pct', $s, 'number', 'step="0.1" min="0" max="50" style="width:90px"' );
+					}, 'Protects against bad data. The store keeps the previous price and shows an "Accept current prices" button in the dashboard. 0 turns this off.' );
 					?>
 					<tr><th scope="row">Test connection</th><td>
 						<button type="button" class="button" id="dgbp-test-spot">Test spot prices</button>
@@ -351,7 +385,10 @@ class DGBP_Admin {
 					}, 'Also the price used in the cart until the customer chooses a payment method at checkout.' );
 					self::row( 'Price table', function () use ( $s ) {
 						self::checkbox( 'show_table', $s, 'Show all three prices on the product page' );
-					} );
+					}, 'For Elementor single-product templates, add a Shortcode widget with <code>[dg_product_prices]</code>.' );
+					self::row( 'Checkout price lock (minutes)', function () use ( $s ) {
+						self::text( 'lock_minutes', $s, 'number', 'min="0" max="120" style="width:90px"' );
+					}, 'When a customer opens checkout, their prices are frozen for this long. If it runs out before they order, they are shown the updated total first. 0 turns this off.' );
 
 					if ( function_exists( 'WC' ) && WC()->payment_gateways() ) {
 						self::row( 'Payment methods', function () use ( $s ) {

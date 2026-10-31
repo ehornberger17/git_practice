@@ -19,6 +19,21 @@ class DGBP_Pricing {
 	private static $cache = array();
 
 	/**
+	 * Active checkout price lock for this request:
+	 * { spot: [metal => {ask,...}], products: [code => price], time, expires } or null.
+	 */
+	private static $lock = null;
+
+	public static function set_lock( $lock ) {
+		self::$lock  = is_array( $lock ) ? $lock : null;
+		self::$cache = array();
+	}
+
+	public static function get_lock() {
+		return self::$lock;
+	}
+
+	/**
 	 * Pure calculation (no WordPress calls) so it can be unit-tested.
 	 */
 	public static function compute( $basis, $oz, $premium_type, $premium_value, $debit_pct, $credit_pct, $decimals = 2 ) {
@@ -80,8 +95,20 @@ class DGBP_Pricing {
 		$base_amount = null;
 		$updated     = 0;
 		$spot_ask    = null;
+		$locked      = false;
+		$lock        = self::$lock;
+		$code        = (string) $m( '_dgbp_dg_code' );
 
-		if ( 'dg_product' === $basis ) {
+		if ( $lock && 'dg_product' === $basis && isset( $lock['products'][ $code ] ) ) {
+			$base_amount = (float) $lock['products'][ $code ];
+			$updated     = (int) $lock['time'];
+			$locked      = true;
+		} elseif ( $lock && 'dg_product' !== $basis && isset( $lock['spot'][ $metal ]['ask'] ) && $oz > 0 ) {
+			$spot_ask    = (float) $lock['spot'][ $metal ]['ask'];
+			$base_amount = $spot_ask * $oz;
+			$updated     = (int) $lock['time'];
+			$locked      = true;
+		} elseif ( 'dg_product' === $basis ) {
 			$p           = DGBP_API::get_product_price( $m( '_dgbp_dg_code' ) );
 			$base_amount = $p['price'];
 			$updated     = (int) $p['updated'];
@@ -103,12 +130,14 @@ class DGBP_Pricing {
 				'stale'     => true,
 				'available' => false,
 				'spot'      => null,
+				'locked'    => false,
 			);
 		}
 
 		$decimals = function_exists( 'wc_get_price_decimals' ) ? wc_get_price_decimals() : 2;
 		$prices   = self::compute( $base_amount, $oz, $ptype, $pval, $dpct, $cpct, $decimals );
-		$too_old  = DGBP_API::is_too_old( $updated );
+		// A running checkout lock was taken from fresh prices, so it stays sellable until it expires.
+		$too_old  = $locked ? false : DGBP_API::is_too_old( $updated );
 
 		$result = array_merge(
 			$prices,
@@ -117,6 +146,7 @@ class DGBP_Pricing {
 				'stale'     => $too_old,
 				'available' => ! $too_old,
 				'spot'      => $spot_ask,
+				'locked'    => $locked,
 			)
 		);
 

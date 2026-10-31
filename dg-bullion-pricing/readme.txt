@@ -43,6 +43,32 @@ The shop shows the headline tier you pick (default: wire). In checkout the
 cart re-prices instantly when the customer changes payment method, and the
 order records the tier used and a spot snapshot.
 
+== Checkout price lock ==
+
+When a customer opens checkout, their metal prices are frozen for
+"Checkout price lock" minutes (default 10). If it runs out before they order,
+they see "Your price lock ran out..." with the updated total and place the
+order again. Each order gets a note with the spot (and DG product prices)
+used. Set to 0 to turn off.
+
+== Price-jump hold ==
+
+If one update moves a metal's spot (or a DG product price) more than
+"Hold prices if one update moves more than" percent (default 5%), the store
+keeps the previous price and the dashboard shows "Accept current prices".
+A one-off glitch clears itself when a normal price comes back. If nobody
+accepts a real move, bullion sales pause once the held price is older than
+the stale-price limit. Set to 0 to turn off.
+
+== Elementor ==
+
+* Ticker: placed under the Elementor header automatically, or put
+  [dg_ticker] in a Shortcode widget ([spot_ticker] also works).
+* Single product templates: add a Shortcode widget with [dg_product_prices]
+  ([spot_product_prices] also works) to show wire / debit / credit prices.
+* Checkout: use the Elementor Checkout widget or [woocommerce_checkout], not
+  the Checkout block.
+
 == Safety ==
 
 * The API token stays on the server. Browsers only call this site's own

@@ -13,6 +13,7 @@ class DGBP_Ticker {
 
 	public static function init() {
 		add_shortcode( 'dg_ticker', array( __CLASS__, 'shortcode' ) );
+		add_shortcode( 'spot_ticker', array( __CLASS__, 'shortcode' ) ); // Name used by the earlier plugin.
 
 		if ( ! DGBP_Settings::get( 'ticker_enabled' ) || is_admin() ) {
 			return;

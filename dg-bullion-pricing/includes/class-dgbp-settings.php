@@ -32,6 +32,8 @@ class DGBP_Settings {
 			'product_price_key'  => '',
 			'cache_seconds'      => 30,
 			'stale_minutes'      => 10,
+			'max_jump_pct'       => 5,     // Hold prices if one update moves more than this. 0 = off.
+			'lock_minutes'       => 10,    // Checkout price lock. 0 = off.
 
 			// Ticker.
 			'ticker_enabled'     => 1,

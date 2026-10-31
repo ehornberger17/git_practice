@@ -12,6 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class DGBP_Woo {
 
 	const CART_TIER_META = '_dgbp_cart_tier';
+	const LOCK_SESSION   = 'dgbp_lock';
 
 	public static function init() {
 		// Product editor.
@@ -27,6 +28,8 @@ class DGBP_Woo {
 		add_filter( 'woocommerce_is_purchasable', array( __CLASS__, 'filter_purchasable' ), 99, 2 );
 		add_filter( 'woocommerce_get_price_html', array( __CLASS__, 'price_html' ), 99, 2 );
 		add_action( 'woocommerce_single_product_summary', array( __CLASS__, 'price_table' ), 11 );
+		add_shortcode( 'dg_product_prices', array( __CLASS__, 'shortcode_prices' ) );
+		add_shortcode( 'spot_product_prices', array( __CLASS__, 'shortcode_prices' ) ); // Name used by the earlier plugin.
 
 		// Cart & checkout.
 		add_action( 'woocommerce_before_calculate_totals', array( __CLASS__, 'apply_cart_tier' ), 20 );
@@ -38,6 +41,8 @@ class DGBP_Woo {
 		add_action( 'woocommerce_cart_totals_before_order_total', array( __CLASS__, 'cart_tier_row' ) );
 		add_action( 'woocommerce_checkout_create_order_line_item', array( __CLASS__, 'line_item_meta' ), 10, 3 );
 		add_action( 'woocommerce_checkout_create_order', array( __CLASS__, 'order_meta' ), 10, 2 );
+		add_action( 'woocommerce_checkout_order_processed', array( __CLASS__, 'order_processed' ), 10, 3 );
+		add_action( 'template_redirect', array( __CLASS__, 'checkout_page_lock' ) );
 		add_filter( 'woocommerce_hidden_order_itemmeta', array( __CLASS__, 'hide_item_meta' ) );
 		add_action( 'woocommerce_admin_order_data_after_billing_address', array( __CLASS__, 'admin_order_tier' ) );
 
@@ -243,23 +248,47 @@ class DGBP_Woo {
 		);
 	}
 
-	public static function price_table() {
-		global $product;
-		if ( ! DGBP_Settings::get( 'show_table' ) || ! self::applies( $product ) ) {
-			return;
+	private static $table_shown = array();
+
+	public static function render_table( $product ) {
+		if ( ! self::applies( $product ) ) {
+			return '';
 		}
 		$pid = $product->get_id();
 		$p   = DGBP_Pricing::for_product( $pid );
 		if ( ! $p || ! $p['available'] ) {
+			return '<p class="dgbp-unavailable">Live pricing is temporarily unavailable.</p>';
+		}
+		self::$table_shown[ $pid ] = true;
+		$html = '<table class="dgbp-price-table" data-dgbp-pid="' . (int) $pid . '"><thead><tr><th>Payment method</th><th>Price</th></tr></thead><tbody>';
+		foreach ( DGBP_Settings::TIERS as $t ) {
+			$html .= '<tr class="dgbp-row-' . esc_attr( $t ) . '"><td>' . esc_html( DGBP_Settings::tier_label( $t ) ) . '</td><td data-dgbp-tier="' . esc_attr( $t ) . '">' . wp_kses_post( wc_price( $p[ $t ] ) ) . '</td></tr>';
+		}
+		$html .= '</tbody></table>';
+		$mins  = (int) DGBP_Settings::get( 'lock_minutes' );
+		$note  = $mins > 0
+			? sprintf( 'Prices move with the live metals market and are locked for %d minutes once you start checkout.', $mins )
+			: 'Prices move with the live metals market and are set when your order is placed.';
+		$html .= '<p class="dgbp-price-note">' . esc_html( $note ) . '</p>';
+		return $html;
+	}
+
+	public static function price_table() {
+		global $product;
+		if ( ! DGBP_Settings::get( 'show_table' ) || ! $product || isset( self::$table_shown[ $product->get_id() ] ) ) {
 			return;
 		}
-		$min = $p['wire'];
-		echo '<table class="dgbp-price-table" data-dgbp-pid="' . (int) $pid . '"><thead><tr><th>Payment method</th><th>Price</th></tr></thead><tbody>';
-		foreach ( DGBP_Settings::TIERS as $t ) {
-			echo '<tr class="dgbp-row-' . esc_attr( $t ) . '"><td>' . esc_html( DGBP_Settings::tier_label( $t ) ) . '</td><td data-dgbp-tier="' . esc_attr( $t ) . '">' . wp_kses_post( wc_price( $p[ $t ] ) ) . '</td></tr>';
+		echo self::render_table( $product ); // phpcs:ignore -- escaped in render_table().
+	}
+
+	/** [dg_product_prices] or [dg_product_prices id="123"] — for Elementor product templates. */
+	public static function shortcode_prices( $atts ) {
+		$atts    = shortcode_atts( array( 'id' => 0 ), $atts );
+		$product = $atts['id'] ? wc_get_product( (int) $atts['id'] ) : ( isset( $GLOBALS['product'] ) && $GLOBALS['product'] instanceof WC_Product ? $GLOBALS['product'] : wc_get_product( get_the_ID() ) );
+		if ( ! $product || isset( self::$table_shown[ $product->get_id() ] ) ) {
+			return '';
 		}
-		echo '</tbody></table>';
-		echo '<p class="dgbp-price-note">Prices move with the live metals market and are locked when your order is placed.</p>';
+		return self::render_table( $product );
 	}
 
 	/* ====================================================================
@@ -350,9 +379,89 @@ class DGBP_Woo {
 	 * Cart & checkout
 	 * ================================================================= */
 
+	/* --------------------------------------------------------------------
+	 * Checkout price lock
+	 * ----------------------------------------------------------------- */
+
+	private static function lock_enabled() {
+		return (int) DGBP_Settings::get( 'lock_minutes' ) > 0;
+	}
+
+	/** The customer's running lock, or null if none / expired. */
+	public static function session_lock() {
+		if ( ! WC()->session ) {
+			return null;
+		}
+		$lock = WC()->session->get( self::LOCK_SESSION );
+		return ( is_array( $lock ) && (int) $lock['expires'] > time() ) ? $lock : null;
+	}
+
+	/** Snapshot current prices for this customer. Returns null if prices aren't fresh enough to lock. */
+	public static function start_lock() {
+		if ( ! WC()->session || ! self::lock_enabled() ) {
+			return null;
+		}
+		DGBP_Pricing::set_lock( null );
+		$spot = DGBP_API::get_spot();
+		if ( empty( $spot['prices'] ) || DGBP_API::is_too_old( $spot['updated'] ) ) {
+			return null;
+		}
+		$products = array();
+		if ( WC()->cart ) {
+			foreach ( WC()->cart->get_cart() as $item ) {
+				$pid = isset( $item['data'] ) ? $item['data']->get_id() : 0;
+				if ( $pid && 'dg_product' === get_post_meta( $pid, '_dgbp_basis', true ) ) {
+					$code = (string) get_post_meta( $pid, '_dgbp_dg_code', true );
+					$pp   = DGBP_API::get_product_price( $code );
+					if ( null !== $pp['price'] && ! DGBP_API::is_too_old( $pp['updated'] ) ) {
+						$products[ $code ] = (float) $pp['price'];
+					}
+				}
+			}
+		}
+		$lock = array(
+			'spot'      => $spot['prices'],
+			'spot_time' => (int) $spot['updated'],
+			'products'  => $products,
+			'time'      => time(),
+			'expires'   => time() + (int) DGBP_Settings::get( 'lock_minutes' ) * MINUTE_IN_SECONDS,
+		);
+		WC()->session->set( self::LOCK_SESSION, $lock );
+		return $lock;
+	}
+
+	/** Make sure checkout requests price against the customer's lock, starting one if needed. */
+	private static function use_lock( $may_start = true ) {
+		if ( ! self::lock_enabled() || ! self::in_checkout() || ! self::cart_has_bullion() ) {
+			DGBP_Pricing::set_lock( null );
+			return null;
+		}
+		$lock = self::session_lock();
+		if ( ! $lock && $may_start ) {
+			$lock = self::start_lock();
+		}
+		DGBP_Pricing::set_lock( $lock );
+		return $lock;
+	}
+
+	/** Start the lock as soon as the checkout page is opened. */
+	public static function checkout_page_lock() {
+		if ( function_exists( 'is_checkout' ) && is_checkout() && ! is_wc_endpoint_url() ) {
+			self::use_lock();
+		}
+	}
+
+	private static $in_tier_pass = false;
+
 	public static function apply_cart_tier( $cart ) {
 		if ( is_admin() && ! wp_doing_ajax() ) {
 			return;
+		}
+		if ( ! self::$in_tier_pass ) {
+			self::$in_tier_pass = true;
+			// Final order submission must not silently start a new lock; checkout_process handles that.
+			self::use_lock( ! self::is_submitting() );
+			self::$in_tier_pass = false;
 		}
 		$tier = self::current_tier();
 		foreach ( $cart->get_cart() as $item ) {
@@ -381,8 +490,20 @@ class DGBP_Woo {
 		}
 	}
 
+	private static function is_submitting() {
+		return isset( $_GET['wc-ajax'] ) && 'checkout' === $_GET['wc-ajax']; // phpcs:ignore
+	}
+
 	/** Runs at the start of order submission: re-price at the chosen payment method. */
 	public static function checkout_process() {
+		// Expired lock: re-lock at current prices and make the customer review the new total.
+		if ( self::lock_enabled() && self::cart_has_bullion() && ! self::session_lock() ) {
+			if ( self::start_lock() ) {
+				wc_add_notice( 'Your price lock ran out, so your order has been updated to current metal prices. Please review the new total and place your order again.', 'error' );
+				WC()->session->set( 'refresh_totals', true );
+			}
+		}
+		self::use_lock( false );
 		$gw = self::posted( 'payment_method' );
 		if ( self::gateway_asks_card_type( $gw ) && ! in_array( self::posted( 'dgbp_card_type' ), array( 'debit', 'credit' ), true ) ) {
 			wc_add_notice( 'Please choose whether you are paying by debit card or credit card.', 'error' );
@@ -391,7 +512,6 @@ class DGBP_Woo {
 			WC()->session->set( 'chosen_payment_method', $gw );
 			WC()->session->set( 'dgbp_card_type', sanitize_key( self::posted( 'dgbp_card_type' ) ) );
 		}
-		DGBP_Pricing::flush();
 		WC()->cart->calculate_totals();
 	}
 
@@ -429,6 +549,10 @@ class DGBP_Woo {
 		}
 		$tier = self::current_tier();
 		echo '<tr class="dgbp-tier-row"><th>Bullion pricing</th><td>' . esc_html( DGBP_Settings::tier_label( $tier ) ) . ' price</td></tr>';
+		$lock = DGBP_Pricing::get_lock();
+		if ( $lock ) {
+			echo '<tr class="dgbp-lock-row"><th>Prices locked until</th><td data-dgbp-expires="' . (int) $lock['expires'] . '">' . esc_html( wp_date( get_option( 'time_format', 'g:i A' ), (int) $lock['expires'] ) ) . '</td></tr>';
+		}
 	}
 
 	public static function cart_tier_row() {
@@ -461,9 +585,48 @@ class DGBP_Woo {
 		if ( $ct ) {
 			$order->update_meta_data( '_dgbp_card_type', $ct );
 		}
-		$spot = DGBP_API::get_spot();
+		$lock   = DGBP_Pricing::get_lock();
+		$spot   = $lock ? array( 'prices' => $lock['spot'], 'updated' => $lock['spot_time'] ) : DGBP_API::get_spot();
 		if ( ! empty( $spot['prices'] ) ) {
 			$order->update_meta_data( '_dgbp_spot_snapshot', wp_json_encode( $spot['prices'] ) );
+			$order->update_meta_data( '_dgbp_spot_time', (int) $spot['updated'] );
+		}
+		if ( $lock ) {
+			$order->update_meta_data( '_dgbp_lock', wp_json_encode( $lock ) );
+		}
+	}
+
+	/** Add an order note recording the prices used, then release the customer's lock. */
+	public static function order_processed( $order_id, $posted, $order ) {
+		$order = $order instanceof WC_Order ? $order : wc_get_order( $order_id );
+		if ( ! $order || ! $order->get_meta( '_dgbp_tier' ) ) {
+			return;
+		}
+		$snap  = json_decode( (string) $order->get_meta( '_dgbp_spot_snapshot' ), true );
+		$parts = array();
+		foreach ( (array) $snap as $metal => $p ) {
+			if ( isset( DGBP_Settings::METALS[ $metal ], $p['ask'] ) ) {
+				$parts[] = DGBP_Settings::METALS[ $metal ] . ' $' . number_format( (float) $p['ask'], 2 );
+			}
+		}
+		$lock = json_decode( (string) $order->get_meta( '_dgbp_lock' ), true );
+		if ( is_array( $lock ) && ! empty( $lock['products'] ) ) {
+			foreach ( $lock['products'] as $code => $price ) {
+				$parts[] = 'DG ' . $code . ' $' . number_format( (float) $price, 2 );
+			}
+		}
+		$order->add_order_note(
+			sprintf(
+				'Bullion priced at the %s price using %s spot from %s%s: %s.',
+				DGBP_Settings::tier_label( $order->get_meta( '_dgbp_tier' ) ),
+				'production' === DGBP_Settings::get( 'environment' ) ? 'live' : 'STAGING',
+				wp_date( 'M j, Y g:i A', (int) $order->get_meta( '_dgbp_spot_time' ) ),
+				is_array( $lock ) ? ' (checkout lock)' : '',
+				implode( ', ', $parts )
+			)
+		);
+		if ( WC()->session ) {
+			WC()->session->set( self::LOCK_SESSION, null );
 		}
 	}
 

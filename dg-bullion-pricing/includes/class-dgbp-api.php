@@ -19,6 +19,54 @@ class DGBP_API {
 	const SPOT_TRANSIENT  = 'dgbp_spot';
 	const SPOT_LAST_GOOD  = 'dgbp_spot_last_good';
 	const PROD_LAST_GOOD  = 'dgbp_product_last_good';
+	const HOLD            = 'dgbp_hold';
+	const ACCEPT_UNTIL    = 'dgbp_accept_until';
+
+	/* --------------------------------------------------------------------
+	 * Spot-jump hold
+	 * ----------------------------------------------------------------- */
+
+	/** True if a single update moved further than the allowed percentage. */
+	public static function jumped( $old, $new ) {
+		$pct = (float) DGBP_Settings::get( 'max_jump_pct' );
+		if ( $pct <= 0 || (float) $old <= 0 ) {
+			return false;
+		}
+		return abs( (float) $new - (float) $old ) / (float) $old * 100 > $pct;
+	}
+
+	private static function accepting() {
+		return (int) get_option( self::ACCEPT_UNTIL, 0 ) > time();
+	}
+
+	/** @return array key => { label, old, new, time } */
+	public static function holds() {
+		$h = get_option( self::HOLD, array() );
+		return is_array( $h ) ? $h : array();
+	}
+
+	/** Replace all hold entries whose key starts with $prefix. */
+	private static function set_holds( $prefix, array $entries ) {
+		$all = self::holds();
+		foreach ( array_keys( $all ) as $k ) {
+			$is_group = ':' === substr( $prefix, -1 );
+			if ( $k === $prefix || ( $is_group && 0 === strpos( $k, $prefix ) ) ) {
+				unset( $all[ $k ] );
+			}
+		}
+		$all = array_merge( $all, $entries );
+		if ( $all !== self::holds() ) {
+			update_option( self::HOLD, $all, false );
+		}
+	}
+
+	/** Admin accepted the new prices: take them on the next fetch. */
+	public static function accept_current() {
+		update_option( self::ACCEPT_UNTIL, time() + 120, false );
+		delete_option( self::HOLD );
+		self::cron_refresh();
+		delete_option( self::ACCEPT_UNTIL );
+	}
 
 	/* --------------------------------------------------------------------
 	 * HTTP
@@ -231,6 +279,30 @@ class DGBP_API {
 		if ( ! is_wp_error( $raw ) ) {
 			$prices = self::parse_spot( $raw );
 			if ( ! empty( $prices ) ) {
+				// Hold if any metal moved suspiciously far since the last accepted price.
+				$last  = get_option( self::SPOT_LAST_GOOD );
+				$holds = array();
+				if ( ! self::accepting() && is_array( $last ) && ! empty( $last['prices'] ) ) {
+					foreach ( $prices as $metal => $p ) {
+						if ( isset( $last['prices'][ $metal ]['ask'] ) && self::jumped( $last['prices'][ $metal ]['ask'], $p['ask'] ) ) {
+							$holds[ 'spot:' . $metal ] = array(
+								'label' => DGBP_Settings::METALS[ $metal ] . ' spot',
+								'old'   => (float) $last['prices'][ $metal ]['ask'],
+								'new'   => (float) $p['ask'],
+								'time'  => time(),
+							);
+						}
+					}
+				}
+				self::set_holds( 'spot:', $holds );
+				if ( $holds ) {
+					$held          = $last;
+					$held['stale'] = false;
+					$held['held']  = true;
+					set_transient( self::SPOT_TRANSIENT, $held, max( 5, (int) DGBP_Settings::get( 'cache_seconds' ) ) );
+					return $held;
+				}
+
 				$result = array(
 					'prices'  => $prices,
 					'updated' => time(),
@@ -277,7 +349,27 @@ class DGBP_API {
 		$last  = get_option( self::PROD_LAST_GOOD, array() );
 		$last  = is_array( $last ) ? $last : array();
 
+		if ( null !== $price && $price > 0 && ! self::accepting() && isset( $last[ $code ]['price'] ) && self::jumped( $last[ $code ]['price'], $price ) ) {
+			self::set_holds(
+				'code:' . $code,
+				array(
+					'code:' . $code => array(
+						'label' => 'Dillon Gage ' . $code,
+						'old'   => (float) $last[ $code ]['price'],
+						'new'   => (float) $price,
+						'time'  => time(),
+					),
+				)
+			);
+			$held          = $last[ $code ];
+			$held['stale'] = false;
+			$held['held']  = true;
+			set_transient( $tkey, $held, max( 5, (int) DGBP_Settings::get( 'cache_seconds' ) ) );
+			return $held;
+		}
+
 		if ( null !== $price && $price > 0 ) {
+			self::set_holds( 'code:' . $code, array() );
 			$result = array( 'price' => $price, 'updated' => time(), 'stale' => false );
 			set_transient( $tkey, $result, max( 5, (int) DGBP_Settings::get( 'cache_seconds' ) ) );
 			$last[ $code ] = $result;
