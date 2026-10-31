@@ -1,0 +1,122 @@
+/* DG Bullion ticker — colors come from Settings > DG Bullion */
+.dgbp-ticker {
+	--dgbp-bg: #0f2340;
+	--dgbp-text: #fff;
+	--dgbp-label: #c9a54a;
+	--dgbp-up: #3ccf7a;
+	--dgbp-down: #ff6b6b;
+	--dgbp-border: #c9a54a;
+	--dgbp-h: 34px;
+	--dgbp-fs: 13px;
+
+	position: relative;
+	z-index: 50;
+	width: 100%;
+	height: var(--dgbp-h);
+	background: var(--dgbp-bg);
+	color: var(--dgbp-text);
+	border-bottom: 2px solid var(--dgbp-border);
+	font-size: var(--dgbp-fs);
+	line-height: var(--dgbp-h);
+	font-variant-numeric: tabular-nums;
+	overflow: hidden;
+	box-sizing: border-box;
+	clear: both;
+}
+.dgbp-ticker *, .dgbp-ticker *::before, .dgbp-ticker *::after { box-sizing: border-box; }
+.dgbp-ticker.dgbp-pending { display: none; }
+
+.dgbp-inner {
+	display: flex;
+	align-items: center;
+	height: 100%;
+	max-width: 1400px;
+	margin: 0 auto;
+	padding: 0 16px;
+	gap: 18px;
+}
+
+.dgbp-label {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	color: var(--dgbp-label);
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: .08em;
+	font-size: .85em;
+	white-space: nowrap;
+}
+.dgbp-dot {
+	width: 7px; height: 7px; border-radius: 50%;
+	background: var(--dgbp-up);
+	box-shadow: 0 0 0 0 var(--dgbp-up);
+	animation: dgbp-pulse 2s infinite;
+}
+.dgbp-ticker.dgbp-stale .dgbp-dot { background: #999; animation: none; }
+
+.dgbp-track {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	position: relative;
+}
+.dgbp-items {
+	display: flex;
+	align-items: center;
+	gap: 28px;
+	white-space: nowrap;
+	width: max-content;
+}
+.dgbp-mode-static .dgbp-items { margin: 0 auto; }
+.dgbp-scrolling .dgbp-items { margin: 0; padding-right: 28px; }
+
+.dgbp-item { display: inline-flex; align-items: baseline; gap: 7px; }
+.dgbp-name { color: var(--dgbp-label); font-weight: 600; }
+.dgbp-price { color: var(--dgbp-text); font-weight: 600; transition: color .4s; }
+.dgbp-chg { font-size: .9em; }
+.dgbp-up { color: var(--dgbp-up); }
+.dgbp-down { color: var(--dgbp-down); }
+.dgbp-flat { opacity: .7; }
+.dgbp-flash-up .dgbp-price { color: var(--dgbp-up); }
+.dgbp-flash-down .dgbp-price { color: var(--dgbp-down); }
+
+.dgbp-meta {
+	flex: 0 0 auto;
+	display: inline-flex;
+	gap: 14px;
+	font-size: .82em;
+	opacity: .75;
+	white-space: nowrap;
+}
+
+/* Continuous scroll (and static mode on narrow screens) */
+.dgbp-scrolling .dgbp-items {
+	justify-content: flex-start;
+	width: max-content;
+	animation: dgbp-marquee var(--dgbp-speed, 40s) linear infinite;
+}
+.dgbp-scrolling .dgbp-track:hover .dgbp-items { animation-play-state: paused; }
+.dgbp-scrolling .dgbp-track {
+	-webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+	        mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+}
+
+@keyframes dgbp-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes dgbp-pulse {
+	0% { box-shadow: 0 0 0 0 rgba(60, 207, 122, .6); }
+	70% { box-shadow: 0 0 0 6px rgba(60, 207, 122, 0); }
+	100% { box-shadow: 0 0 0 0 rgba(60, 207, 122, 0); }
+}
+
+@media (max-width: 782px) {
+	.dgbp-inner { padding: 0 10px; gap: 12px; }
+	.dgbp-meta { display: none; }
+	.dgbp-label { font-size: .75em; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.dgbp-scrolling .dgbp-items { animation: none; }
+	.dgbp-scrolling .dgbp-track { overflow-x: auto; }
+	.dgbp-dot { animation: none; }
+}
