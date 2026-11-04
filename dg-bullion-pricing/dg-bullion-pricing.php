@@ -27,6 +27,7 @@ require_once DGBP_DIR . 'includes/class-dgbp-rest.php';
 require_once DGBP_DIR . 'includes/class-dgbp-ticker.php';
 require_once DGBP_DIR . 'includes/class-dgbp-admin.php';
 require_once DGBP_DIR . 'includes/class-dgbp-woo.php';
+require_once DGBP_DIR . 'includes/class-dgbp-tax.php';
 
 // Declare compatibility with WooCommerce High-Performance Order Storage.
 add_action(
@@ -48,6 +49,7 @@ add_action(
 		}
 		if ( class_exists( 'WooCommerce' ) ) {
 			DGBP_Woo::init();
+			DGBP_Tax::init();
 		}
 	}
 );

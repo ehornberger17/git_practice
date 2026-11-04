@@ -64,6 +64,8 @@ class DGBP_Settings {
 			'label_debit'        => 'Debit Card',
 			'label_credit'       => 'Credit Card',
 			'show_table'         => 1,
+			'tax_rules'          => 'florida', // florida | off.
+			'tax_gray_coins'     => 'taxable', // U.S. legal tender coins below HB 999 purity: taxable | exempt.
 			'gateway_map'        => array(),    // gateway_id => wire|debit|credit|ask.
 			'default_gateway_tier'=> 'credit',  // Safe default for unmapped gateways.
 		);

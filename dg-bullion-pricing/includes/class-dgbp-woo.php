@@ -144,6 +144,57 @@ class DGBP_Woo {
 			)
 		);
 
+		if ( 'florida' === DGBP_Settings::get( 'tax_rules' ) ) {
+			echo '<p style="margin:12px 12px 0"><strong>Florida sales tax</strong></p>';
+			woocommerce_wp_select(
+				array(
+					'id'      => '_dgbp_form',
+					'label'   => 'Form',
+					'options' => array( '' => '— choose —' ) + DGBP_Tax::FORMS,
+				)
+			);
+			woocommerce_wp_text_input(
+				array(
+					'id'                => '_dgbp_purity',
+					'label'             => 'Purity',
+					'type'              => 'number',
+					'placeholder'       => 'e.g. .9999 or 99.99',
+					'custom_attributes' => array( 'step' => '0.0001', 'min' => '0' ),
+					'desc_tip'          => true,
+					'description'       => 'Needed for coins: gold ≥ 99.5% and silver ≥ 99.9% are Florida legal tender and tax-exempt.',
+				)
+			);
+			woocommerce_wp_checkbox(
+				array(
+					'id'          => '_dgbp_us_legal_tender',
+					'label'       => 'U.S. legal tender coin',
+					'description' => 'U.S. Mint issue with a face value (e.g. American Eagles, pre-1965 90% silver).',
+				)
+			);
+			woocommerce_wp_select(
+				array(
+					'id'      => '_dgbp_tax_override',
+					'label'   => 'Tax decision',
+					'options' => array(
+						''        => 'Automatic (Florida rules)',
+						'exempt'  => 'Always exempt',
+						'taxable' => 'Always taxable',
+					),
+				)
+			);
+			if ( $pid && DGBP_Pricing::is_bullion( $pid ) ) {
+				$t = DGBP_Tax::for_product( $pid );
+				if ( $t ) {
+					printf(
+						'<p class="form-field"><label>Result</label><strong style="color:%s">%s</strong> — %s</p>',
+						$t['exempt'] ? '#00a32a' : '#b32d2e',
+						$t['exempt'] ? 'Tax-exempt' : 'Taxable',
+						esc_html( $t['reason'] )
+					);
+				}
+			}
+		}
+
 		if ( $pid && DGBP_Pricing::is_bullion( $pid ) ) {
 			$p = DGBP_Pricing::for_product( $pid );
 			echo '<p class="form-field"><label>Current prices</label>';
@@ -169,13 +220,18 @@ class DGBP_Woo {
 			'_dgbp_basis'        => array( 'spot', 'dg_product' ),
 			'_dgbp_metal'        => array_keys( DGBP_Settings::METALS ),
 			'_dgbp_premium_type' => array( 'per_oz', 'flat', 'percent' ),
+			'_dgbp_form'         => array_merge( array( '' ), array_keys( DGBP_Tax::FORMS ) ),
+			'_dgbp_tax_override' => array( '', 'exempt', 'taxable' ),
 		);
 		foreach ( $enum as $k => $allowed ) {
 			if ( isset( $_POST[ $k ] ) && in_array( $_POST[ $k ], $allowed, true ) ) {
 				$product->update_meta_data( $k, sanitize_key( $_POST[ $k ] ) );
 			}
 		}
-		foreach ( array( '_dgbp_weight_oz', '_dgbp_premium_value', '_dgbp_debit_pct', '_dgbp_credit_pct' ) as $k ) {
+		if ( isset( $_POST['_dgbp_form'] ) ) {
+			$product->update_meta_data( '_dgbp_us_legal_tender', isset( $_POST['_dgbp_us_legal_tender'] ) ? 'yes' : 'no' );
+		}
+		foreach ( array( '_dgbp_weight_oz', '_dgbp_premium_value', '_dgbp_debit_pct', '_dgbp_credit_pct', '_dgbp_purity' ) as $k ) {
 			if ( isset( $_POST[ $k ] ) ) {
 				$v = trim( wp_unslash( $_POST[ $k ] ) );
 				$product->update_meta_data( $k, '' === $v ? '' : (string) (float) $v );

@@ -137,6 +137,8 @@ class DGBP_Admin {
 			'ticker_placement'     => array( 'after_header', 'top', 'shortcode' ),
 			'display_tier'         => DGBP_Settings::TIERS,
 			'default_gateway_tier' => DGBP_Settings::TIERS,
+			'tax_rules'            => array( 'florida', 'off' ),
+			'tax_gray_coins'       => array( 'taxable', 'exempt' ),
 		);
 		foreach ( $enums as $k => $allowed ) {
 			if ( isset( $in[ $k ] ) && in_array( $in[ $k ], $allowed, true ) ) {
@@ -415,6 +417,18 @@ class DGBP_Admin {
 							self::select( 'default_gateway_tier', $s, array( 'credit' => 'Credit card price (safest)', 'debit' => 'Debit card price', 'wire' => 'Wire price' ) );
 						} );
 					}
+					?>
+				</table>
+
+				<h2>4. Sales tax</h2>
+				<table class="form-table" role="presentation">
+					<?php
+					self::row( 'Tax rules for bullion products', function () use ( $s ) {
+						self::select( 'tax_rules', $s, array( 'florida' => 'Florida (set tax status automatically)', 'off' => 'Off (use each product\'s own Tax status)' ) );
+					}, 'Exempt: gold, silver and platinum bars and rounds; gold coins ≥ 99.5% and silver coins ≥ 99.9%. Taxable: palladium, other coins, numismatics and other items. Set each product\'s Form and Purity in its General tab. Pair this with WooCommerce Tax for the 6% state rate plus county surtax. This is not tax advice: have your CPA review it.' );
+					self::row( 'U.S. coins below those purities', function () use ( $s ) {
+						self::select( 'tax_gray_coins', $s, array( 'taxable' => 'Taxable (safer until your CPA confirms)', 'exempt' => 'Exempt as U.S. legal tender' ) );
+					}, 'For example American Gold Eagles (91.67%) and pre-1965 90% silver. Sources disagree on these, so ask your CPA.' );
 					?>
 				</table>
 

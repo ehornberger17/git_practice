@@ -60,6 +60,22 @@ A one-off glitch clears itself when a normal price comes back. If nobody
 accepts a real move, bullion sales pause once the held price is older than
 the stale-price limit. Set to 0 to turn off.
 
+== Florida sales tax ==
+
+Settings > DG Bullion > Sales tax = "Florida" (default). Each bullion
+product's tax status is then set automatically from the Form, Purity and
+"U.S. legal tender coin" fields in its General tab:
+
+  Exempt   gold, silver, platinum bars / ingots / rounds (s. 212.08(7)(ww), F.S.)
+           gold coins >= 99.5% and silver coins >= 99.9% (HB 999 legal tender)
+  Taxable  palladium; other coins; numismatics / other items; form not set
+  Setting  U.S. legal tender coins below those purities (e.g. Gold Eagles,
+           90% silver): taxable by default until your CPA confirms
+
+"Tax decision" on a product overrides the rule. Each order line records the
+decision and the reason. Use WooCommerce Tax (free) for the 6% state rate plus
+county surtax on the taxable items. Not tax advice.
+
 == Elementor ==
 
 * Ticker: placed under the Elementor header automatically, or put
